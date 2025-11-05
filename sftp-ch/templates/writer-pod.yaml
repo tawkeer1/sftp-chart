@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ .Values.writerPod.name }}
+spec:
+  restartPolicy: Never
+  containers:
+    - name: writer
+      image: alpine
+      command: {{ toJson .Values.deploy.command }}
+      args: {{ .Values.writerPod.args }}

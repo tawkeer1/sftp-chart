@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.deploy.name }}
+  labels:
+    app: {{ .Values.labels.app }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.labels.app }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.labels.app }}
+    spec:
+      volumes:
+        - name: sftp-data
+          persistentVolumeClaim:
+            claimName: {{ .Values.pvc.name }}
+
+      containers:
+        - name: {{ .Values.deploy.container.name }}
+          image: "{{ .Values.deploy.image.repository }}:{{ .Values.deploy.image.tag }}"
+          imagePullPolicy: {{ .Values.deploy.image.pullPolicy | default "IfNotPresent" }}
+          command: {{ toJson .Values.deploy.command }}
+          args:
+            - {{ .Values.deploy.args | quote }}
+          env:
+            {{- toYaml .Values.env | nindent 12 }}
+
+          volumeMounts:
+            - name: sftp-data
+              mountPath: {{ .Values.deploy.mount.home.path }}
+            - name: sftp-data
+              mountPath: {{ .Values.deploy.mount.user1.path }}
+              subPath: {{ .Values.deploy.mount.user1.subPath }}
+            - name: sftp-data
+              mountPath: {{ .Values.deploy.mount.user2.path }}
+              subPath: {{ .Values.deploy.mount.user2.subPath }}
+            - name: sftp-data
+              mountPath: {{ .Values.deploy.mount.shared.path }}
+              subPath: {{ .Values.deploy.mount.shared.subPath }}
+
+ports:
+  - containerPort: {{ .Values.deploy.container.port }}

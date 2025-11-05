@@ -1,0 +1,108 @@
+namespace: demo
+deploy:
+  name: sftp-deployment
+  image:
+    repository: atmoz/sftp
+    tag: latest
+    pullPolicy: IfNotPresent
+  container:
+    name: sftp
+    port: 22
+  command: [ "/bin/sh", "-c" ]
+  args:
+    - |
+      mkdir -p /home/user1/shared /home/user2/shared /shared;
+      chmod 777 /home/user1/shared /home/user2/shared /shared;
+      exec /entrypoint "user1:${USER1_PWD}:::shared" "user2:${USER2_PWD}:::shared"
+  mount:
+    home:
+      path: /home
+    user1:
+      path: /home/user1/shared
+      subPath: shared
+    user2:
+      path: /home/user2/shared
+      subPath: shared
+    shared:
+      path: /shared
+      subPath: shared
+env:
+  - name: USER1_PWD
+    valueFrom:
+      secretKeyRef:
+        name: sftp-secret
+        key: user1
+  - name: USER2_PWD
+    valueFrom:
+      secretKeyRef:
+        name: sftp-secret
+        key: user2
+service:
+  name: sftp-service
+  port: 22
+  targetPort: 22
+
+labels:
+  app: sftp
+replicaCount: 1
+
+pvc:
+  name: sftp-pvc
+  storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+pv:
+  name: pv-sftp
+  path: /mnt/data/sftp
+  storage: 1Gi
+secret:
+  password:
+    user1: pass1
+    user2: pass2
+writerPod:
+  name: writer-pod
+  args:
+    - |
+      apk add --no-cache sshpass openssh-client;
+      while true; do
+        file="file-$(date +%s).txt";
+        echo "This is test data at $(date)" > "$file";
+        echo "Uploading $file to shared folder...";
+        printf 'cd shared\nput %s\nbye\n' "$file" | sshpass -p "pass1" sftp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o NumberOfPasswordPrompts=1  user1@sftp-service;
+        rm -f "$file";
+        sleep 30;
+      done
+readerPod:
+  name: reader-pod
+  image: alpine
+  mount:
+    name: download-data
+    path: /downloads
+  args:
+    - |
+      apk add --no-cache sshpass openssh-client;
+      mkdir -p /downloads;
+      echo "Starting reader pod...";
+      
+      while true; do
+      echo "Fetching file list from shared folder at $(date)...";
+    
+      # Get remote file list
+      printf 'cd shared\nls -1\nbye\n' | \
+      sshpass -p "pass2" sftp -o StrictHostKeyChecking=no user2@sftp-service 2>&1 | \
+      grep -v "sftp>" | grep -v "bye" | grep -v "^$" > /tmp/filelist.txt;
+    
+      echo "Files available for download:";
+      cat /tmp/filelist.txt || true;
+    
+      if [ -s /tmp/filelist.txt ]; then
+      echo "Downloading all files in one session...";
+      printf 'cd shared\n%s\nbye\n' "$(awk '{print "get " $0 " /downloads/" $0}' /tmp/filelist.txt)" | \
+      sshpass -p "pass2" sftp -o StrictHostKeyChecking=no user2@sftp-service;
+      else
+      echo "No files found to download.";
+      fi
+    
+      echo "Sleeping for 30 seconds...";
+      sleep 30;
+      done
